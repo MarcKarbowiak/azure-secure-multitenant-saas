@@ -1,204 +1,183 @@
-# Azure Secure Multi-Tenant SaaS
+# Azure Secure Multi-Tenant SaaS (Tenant Notes)
 
-Production-grade reference implementation of a secure, multi-tenant SaaS architecture on Azure.
+Production-oriented reference architecture for a secure, multi-tenant SaaS on Azure with hard tenant isolation, Managed Identity-only data access, RBAC, private networking, infrastructure-as-code, and observability baseline.
 
----
+## Stack
 
-## 🛡 Security Posture
+- Frontend: React + TypeScript + Vite (`apps/web`)
+- Backend: Azure Functions-compatible Node + TypeScript API (`apps/api`)
+  - Local dev runtime uses an Express host wrapper (`apps/api/src/local/server.ts`)
+- Database: Azure Cosmos DB SQL API
+- IaC: Bicep (`infra/bicep`)
+- Observability: OpenTelemetry + Application Insights
+- Local mode: Docker Compose (`docker-compose.yml`)
 
-![Zero-Secrets](https://img.shields.io/badge/Zero--Secrets-Managed%20Identity-blue)
-![Tenant Isolated](https://img.shields.io/badge/Tenant-Isolated-brightgreen)
-![RBAC Enforced](https://img.shields.io/badge/RBAC-Enforced-purple)
-![Private Endpoints](https://img.shields.io/badge/Private-Endpoints-orange)
-![AAD Auth](https://img.shields.io/badge/Azure%20AD-AAD%20RBAC-blue)
-
-This repository demonstrates a secure-by-design SaaS architecture with enforced tenant boundaries, identity-based access control, and private cloud networking by default.
-
-This project demonstrates enterprise cloud patterns including strict tenant isolation, zero-secrets design using Managed Identity, RBAC enforcement, private networking, Infrastructure-as-Code, observability, and Docker-based local development.
-
-The application domain is intentionally minimal ("Tenant Notes") so architectural clarity and security design remain the primary focus.
-
----
-
-## 🚀 What This Repository Demonstrates
-
-- Hard multi-tenant isolation (data + access boundaries)
-- Cosmos DB partitioning by `/tenantId`
-- Zero-secrets architecture (Managed Identity only)
-- RBAC-based Azure resource access
-- Private Endpoints + Private DNS Zones
-- VNet-integrated application deployment
-- Infrastructure-as-Code using Bicep
-- Docker local development mode
-- OpenTelemetry tracing + structured logging
-- Audit logging for all data mutations
-
-This is a blueprint for building secure SaaS systems — not a feature-heavy product.
-
----
-
-## 🏗 Architecture Overview
+## Architecture
 
 ```mermaid
 flowchart LR
+  User[User Browser] -->|JWT| Web[React Web App]
+  Web -->|Bearer token| Api[Azure Functions API]
+  Api -->|Managed Identity + RBAC| Cosmos[(Cosmos DB SQL)]
+  Api -->|Managed Identity + RBAC| Storage[(Storage Account)]
+  Api -->|Managed Identity + RBAC| KeyVault[(Key Vault)]
+  Api -->|OTel traces + logs| AppInsights[(Application Insights)]
 
-User --> WebApp[React Web App]
-WebApp -->|JWT| API[Azure Functions API]
-API -->|AAD RBAC| Cosmos[(Cosmos DB)]
-API -->|Managed Identity| Storage[(Blob Storage)]
-API -->|Managed Identity| KeyVault[(Key Vault)]
-API --> AppInsights[(Application Insights)]
+  subgraph Private Network
+    Api
+    Cosmos
+    Storage
+    KeyVault
+  end
 
-subgraph Private Network
-Cosmos
-Storage
-KeyVault
-end
+  subgraph Isolation Controls
+    T1[Tenant claim extraction]
+    T2[Role guard]
+    T3[Repository tenant filter]
+    T4[Cosmos partition key /tenantId]
+  end
+
+  Api --> T1 --> T2 --> T3 --> T4
 ```
 
-### Key Design Principles
+## Tenant Isolation Guarantees
 
-1. Tenant ID is required on every entity
-2. Cosmos partition key = `/tenantId`
-3. Data access layer enforces tenant boundaries
-4. No connection strings stored in configuration
-5. All Azure services accessed via Managed Identity
+- Every note includes `tenantId`.
+- Cosmos partition key is `/tenantId`.
+- All reads and writes are tenant-scoped in repository methods.
+- JWT tenant claim is required per request.
+- Cross-tenant access resolves as not found/denied.
+- Unit tests validate cross-tenant rejection.
 
----
+## API Endpoints
 
-## 🔐 Security Model
+- `GET /api/notes`
+- `POST /api/notes`
+- `PUT /api/notes/{id}`
+- `DELETE /api/notes/{id}`
+- `GET /api/health`
 
-### Multi-Tenancy
+Per request, the API:
 
-- Every request extracts `tenantId` from JWT
-- All database queries are scoped to tenant
-- Cross-tenant access is explicitly rejected
-- Partition strategy enforces tenant boundary
+1. Extracts `userId` + `tenantId` + `roles` from JWT.
+2. Validates role permissions.
+3. Enforces tenant scoping in data access.
+4. Emits structured audit logs with `correlationId`.
 
-### Zero-Secrets Design
+JWT note:
 
-- Managed Identity for Cosmos, Storage, Key Vault
-- No access keys in code or configuration
-- Azure RBAC used for data-plane authorization
+- The API currently parses JWT payload claims but does not perform JWT signature validation directly.
+- Signature validation is expected to be enforced by an upstream identity/auth layer in production.
 
-### Network Isolation
+## Zero-Secrets Model
 
-- Private Endpoints for Cosmos, Storage, Key Vault
-- VNet integration for application runtime
-- Private DNS zones provisioned via IaC
+- Cosmos uses endpoint + `ManagedIdentityCredential` (no connection string).
+- Function storage uses identity-based settings (`AzureWebJobsStorage__*`).
+- Key Vault and Storage access are RBAC-based.
+- No application-level Cosmos/Storage/Key Vault connection strings are required.
 
-See `/docs/security` for detailed explanations.
+## Local Development
 
----
+### Prerequisites
 
-## 🧩 Repository Structure
+- Node.js 20+
+- npm 10+
+- Docker Desktop (for compose mode)
 
-```
-/apps
-  /web              # React + TypeScript frontend
-  /api              # Azure Functions API
-/packages
-  /shared           # Shared types, tenant context, auth helpers
-/docs
-  /architecture
-  /security
-  /operations
-/infra
-  /bicep            # Azure Infrastructure-as-Code
-  deploy.ps1
-/docker
-  docker-compose.yml
-```
-
----
-
-## 💻 Run Locally (Docker)
-
-Requirements:
-- Docker
-- Node 18+
+### Run API + Web directly
 
 ```bash
-docker compose up
+npm install
+npm run dev:api
+npm run dev:web
 ```
 
-This launches:
-- Web frontend
-- API backend
-- Local data mode (Cosmos emulator or in-memory fallback)
+Direct run defaults:
 
----
+- API starts on `http://localhost:7071` and exposes routes under `/api`.
+- Web starts on `http://localhost:5173`.
+- API defaults to `REPOSITORY_MODE=memory` unless you override environment variables.
 
-## ☁ Deploy to Azure
+### Run with Docker Compose
 
-Requirements:
-- Azure CLI
-- Bicep installed
-- Proper RBAC permissions
+```bash
+docker compose up --build
+```
+
+Default compose mode runs API with in-memory repository.
+
+To start Cosmos emulator service as an optional dependency:
+
+```bash
+docker compose --profile cosmos up --build
+```
+
+Important:
+
+- The compose API service is configured with `REPOSITORY_MODE=memory` by default.
+- Enabling the `cosmos` profile starts the emulator container, but does not automatically switch API repository mode to Cosmos.
+- To use Cosmos mode locally, provide `REPOSITORY_MODE=cosmos` and related Cosmos env vars to the API service.
+
+## Configuration
+
+API environment variables:
+
+- `REPOSITORY_MODE` = `memory` or `cosmos`
+- `COSMOS_ENDPOINT` (required when `REPOSITORY_MODE=cosmos`)
+- `COSMOS_DATABASE_ID` (default: `TenantNotes`)
+- `COSMOS_CONTAINER_ID` (default: `Notes`)
+- `APPLICATIONINSIGHTS_CONNECTION_STRING` (optional for exporter enablement)
+
+## Infrastructure Deployment
+
+### Deploy
 
 ```powershell
-cd infra
-./deploy.ps1
+./deploy.ps1 -SubscriptionId <subscription-id> -ResourceGroupName <rg-name> -Location eastus
 ```
 
-The deployment provisions:
+Optional parameters:
 
-- Resource Group
-- Azure Functions or App Service
-- Cosmos DB (AAD RBAC enabled)
-- Storage Account
-- Key Vault
-- Managed Identity
-- Role Assignments
-- Private Endpoints
-- Private DNS Zones
+- `-ParameterFile` (default `infra/bicep/parameters.dev.json`)
 
----
+### Dry run (what-if)
 
-## 📊 Observability
+```powershell
+./deploy.ps1 -SubscriptionId <subscription-id> -ResourceGroupName <rg-name> -DryRun
+```
 
-- OpenTelemetry tracing
-- Correlation ID propagation
-- Structured JSON logging
-- Application Insights integration
-- Health endpoint
+If the resource group does not exist, create it first or run a full deploy once.
 
-See `/docs/operations/observability.md` for details.
+### Templates
 
----
+- `infra/bicep/main.bicep`
+- `infra/bicep/parameters.dev.json`
 
-## 📐 Design Tradeoffs
+Provisioned resources include:
 
-- Simplicity over feature richness
-- Strong tenant boundary enforcement over query flexibility
-- Managed Identity over connection string convenience
-- Clear layering over framework magic
+- Function App + Premium plan
+- Cosmos DB SQL account/db/container (`/tenantId` partition)
+- Storage Account (shared key disabled)
+- Key Vault (RBAC mode)
+- User-assigned Managed Identity
+- Role assignments for MI access
+- VNet + subnets
+- Private endpoints (Cosmos, Storage Blob, Key Vault)
+- Private DNS zones and VNet links
 
-This repository favors architectural clarity and security posture over development speed shortcuts.
+## Documentation
 
----
+- Architecture: `docs/architecture/overview.md`
+- ADR: `docs/architecture/ADR-0001-architecture-overview.md`
+- Cosmos partitioning: `docs/architecture/cosmos-partition-strategy.md`
+- Tenant isolation: `docs/security/tenant-isolation.md`
+- Identity and zero-secrets: `docs/security/identity-zero-secrets.md`
+- Networking: `docs/security/networking-private-endpoints.md`
+- Observability: `docs/operations/observability.md`
 
-## 📄 Architecture Decision Records (ADRs)
+## Known Limitations
 
-See `/docs/architecture` for documented design decisions.
-
----
-
-## 🎯 Intended Audience
-
-- Principal / Staff Engineers
-- Platform Engineers
-- Engineering Managers
-- Cloud Architects
-- Security-conscious SaaS builders
-
----
-
-## 📌 Status
-
-Reference implementation — evolving in staged commits to demonstrate architectural progression.
-
----
-
-If this project is useful, feel free to fork and adapt for your own secure SaaS foundation.
-
+- JWT signature validation is not implemented in the API process itself; token validation is assumed upstream.
+- Test coverage is currently minimal and focused on tenant-boundary/auth helpers in `apps/api/test/tenantBoundary.test.ts`.
+- No automated integration tests currently validate Cosmos DB behavior, Azure RBAC bindings, or Bicep deployments.
+- Docker Cosmos emulator profile is optional and not wired by default to API Cosmos mode configuration.

@@ -2,6 +2,18 @@
 
 Production-grade reference implementation of a secure, multi-tenant SaaS architecture on Azure.
 
+---
+
+## 🛡 Security Posture
+
+![Zero-Secrets](https://img.shields.io/badge/Zero--Secrets-Managed%20Identity-blue)
+![Tenant Isolated](https://img.shields.io/badge/Tenant-Isolated-brightgreen)
+![RBAC Enforced](https://img.shields.io/badge/RBAC-Enforced-purple)
+![Private Endpoints](https://img.shields.io/badge/Private-Endpoints-orange)
+![AAD Auth](https://img.shields.io/badge/Azure%20AD-AAD%20RBAC-blue)
+
+This repository demonstrates a secure-by-design SaaS architecture with enforced tenant boundaries, identity-based access control, and private cloud networking by default.
+
 This project demonstrates enterprise cloud patterns including strict tenant isolation, zero-secrets design using Managed Identity, RBAC enforcement, private networking, Infrastructure-as-Code, observability, and Docker-based local development.
 
 The application domain is intentionally minimal ("Tenant Notes") so architectural clarity and security design remain the primary focus.
